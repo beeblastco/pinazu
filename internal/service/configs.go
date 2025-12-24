@@ -115,9 +115,12 @@ type (
 	// A separation for configuration in order to overcome the Quota limit put by AWS on various Bedrock services.
 	// Most of the time should not be required, but in the case of new accounts, a quota of 2 requests/min is not servicable for any type of LLM use cases.
 	BedrockLLMServiceConfig struct {
-		CredentialType string `yaml:"type"`        // default -> will use the default credential chain, assume role will use the AssumeRole credential chain
-		AssumeRole     string `yaml:"assume_role"` // Role to assume when making calls to AWS for bedrock service
-		Region         string `yaml:"region"`      // AWS region for the bedrock service. It may differ from default region for other system, namely S3.
+		CredentialType  string `yaml:"type"`              // default -> will use the default credential chain, assume role will use the AssumeRole credential chain
+		AssumeRole      string `yaml:"assume_role"`       // Role to assume when making calls to AWS for bedrock service
+		AccessKeyID     string `yaml:"access_key_id"`     // Access key ID (for static credentials)
+		SecretAccessKey string `yaml:"secret_access_key"` // Secret access key (for static credentials)
+		SessionToken    string `yaml:"session_token"`
+		Region          string `yaml:"region"` // AWS region for the bedrock service. It may differ from default region for other system, namely S3.
 	}
 
 	// GoogleLLMServiceConfig represents the configuration for Google AI services.

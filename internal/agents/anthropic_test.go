@@ -240,7 +240,6 @@ func TestFetchAnthropicTools(t *testing.T) {
 		{
 			name:        "empty_tool_refs",
 			toolRefs:    []uuid.UUID{},
-			modelID:     testModelID,
 			expectError: false,
 			validate: func(t *testing.T, tools []anthropic.ToolUnionParam, err error) {
 				assert.NoError(t, err)
@@ -250,7 +249,6 @@ func TestFetchAnthropicTools(t *testing.T) {
 		{
 			name:        "nil_tool_refs",
 			toolRefs:    nil,
-			modelID:     testModelID,
 			expectError: false,
 			validate: func(t *testing.T, tools []anthropic.ToolUnionParam, err error) {
 				assert.NoError(t, err)
@@ -260,7 +258,6 @@ func TestFetchAnthropicTools(t *testing.T) {
 		{
 			name:        "valid_uuid_not_in_db",
 			toolRefs:    []uuid.UUID{uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")},
-			modelID:     testModelID,
 			expectError: false,
 			validate: func(t *testing.T, tools []anthropic.ToolUnionParam, err error) {
 				// If there's a database connection error, skip the test
@@ -279,7 +276,6 @@ func TestFetchAnthropicTools(t *testing.T) {
 		{
 			name:        "real_tool_with_cache",
 			toolRefs:    []uuid.UUID{tool.ID},
-			modelID:     testModelID,
 			expectError: false,
 			validate: func(t *testing.T, tools []anthropic.ToolUnionParam, err error) {
 				// If there's a database connection error, the test should handle it gracefully
@@ -316,7 +312,6 @@ func TestFetchAnthropicTools(t *testing.T) {
 		{
 			name:        "multiple_valid_tools_some_not_in_db",
 			toolRefs:    []uuid.UUID{tool.ID, uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")},
-			modelID:     testModelID,
 			expectError: false,
 			validate: func(t *testing.T, tools []anthropic.ToolUnionParam, err error) {
 				assert.NoError(t, err)
@@ -331,7 +326,6 @@ func TestFetchAnthropicTools(t *testing.T) {
 		{
 			name:        "all_invalid_tool_ids",
 			toolRefs:    []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001"), uuid.MustParse("00000000-0000-0000-0000-000000000002")},
-			modelID:     testModelID,
 			expectError: false,
 			validate: func(t *testing.T, tools []anthropic.ToolUnionParam, err error) {
 				assert.NoError(t, err)
@@ -343,7 +337,6 @@ func TestFetchAnthropicTools(t *testing.T) {
 		{
 			name:        "mixed_valid_and_invalid_tool_ids",
 			toolRefs:    []uuid.UUID{tool.ID, uuid.MustParse("00000000-0000-0000-0000-000000000001"), uuid.MustParse("00000000-0000-0000-0000-000000000002")},
-			modelID:     testModelID,
 			expectError: false,
 			validate: func(t *testing.T, tools []anthropic.ToolUnionParam, err error) {
 				assert.NoError(t, err)
@@ -370,7 +363,7 @@ func TestFetchAnthropicTools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tools, err := mockService.fetchAnthropicTools(tt.toolRefs, tt.modelID)
+			tools, err := mockService.fetchAnthropicTools(tt.toolRefs)
 			tt.validate(t, tools, err)
 		})
 	}

@@ -29,6 +29,18 @@ func newMockServiceConfig() *service.ExternalDependenciesConfig {
 			SSLMode:  "disable",
 		},
 		Tracing: nil,
+		LLMConfig: &service.LLMConfig{
+			Bedrock: &service.BedrockLLMServiceConfig{
+				CredentialType:  "default",
+				Region:          "ap-southeast-1",
+				AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+				SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+				SessionToken:    os.Getenv("AWS_SESSION_TOKEN"),
+			},
+			Google: &service.GoogleLLMServiceConfig{
+				APIKey: os.Getenv("GOOGLE_API_KEY"),
+			},
+		},
 	}
 }
 

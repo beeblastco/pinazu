@@ -141,7 +141,7 @@ func (as *AgentService) handleAnthropicRequest(m []anthropic.MessageParam, spec 
 	// Fetch and convert tools for this agent
 	if len(spec.ToolRefs) > 0 {
 		var err error
-		tools, err = as.fetchAnthropicTools(spec.ToolRefs, spec.Model.ModelID)
+		tools, err = as.fetchAnthropicTools(spec.ToolRefs)
 		if err != nil {
 			as.log.Error("Failed to convert tools to Anthropic format", "error", err)
 			return nil, "", fmt.Errorf("failed to convert tools to Anthropic format: %w", err)
@@ -482,9 +482,7 @@ func (as *AgentService) publishAnthropicStreamEvent(event anthropic.MessageStrea
 }
 
 // fetchAgentTools retrieves tools from database based on agent's tool_refs
-func (as *AgentService) fetchAnthropicTools(toolRefs []uuid.UUID, modelID string) ([]anthropic.ToolUnionParam, error) {
-	var anthropicTools = []anthropic.ToolUnionParam{}
-
+func (as *AgentService) fetchAnthropicTools(toolRefs []uuid.UUID) ([]anthropic.ToolUnionParam, error) {
 	if len(toolRefs) == 0 {
 		return nil, nil
 	}
@@ -496,122 +494,140 @@ func (as *AgentService) fetchAnthropicTools(toolRefs []uuid.UUID, modelID string
 		return nil, fmt.Errorf("failed to fetch tools from database: %w", err)
 	}
 
-	// Check if any tools were not found and log warnings
-	if len(tools) < len(toolRefs) {
-		foundToolIDs := make(map[uuid.UUID]bool)
-		for _, tool := range tools {
-			foundToolIDs[tool.ID] = true
-		}
+	// Log warnings for any missing tools
+	as.logMissingTools(tools, toolRefs)
 
-		for _, toolRef := range toolRefs {
-			if !foundToolIDs[toolRef] {
-				as.log.Warn("Tool not found in database, will not use this tool", "tool_id", toolRef)
-			}
-		}
+	// Convert database tools to Anthropic tool parameters
+	return as.convertToolsToAnthropicParams(tools)
+}
+
+// logMissingTools checks if any requested tools were not found and logs warnings
+func (as *AgentService) logMissingTools(tools []db.Tool, toolRefs []uuid.UUID) {
+	if len(tools) >= len(toolRefs) {
+		return
 	}
 
-	// Extract tool params
+	foundToolIDs := make(map[uuid.UUID]bool)
 	for _, tool := range tools {
-		// Extract description
-		description := ""
-		if tool.Description.Valid {
-			description = tool.Description.String
-		}
+		foundToolIDs[tool.ID] = true
+	}
 
-		// Convert tool config to parameter schema
-		var inputSchema map[string]any
-		switch tool.Config.Type {
-		case db.ToolTypeStandalone:
-			standaloneConfig := tool.Config.GetStandalone()
-			if standaloneConfig != nil {
-				// Convert OpenAPI schema to map for Anthropic
-				schemaBytes, err := json.Marshal(standaloneConfig.Params)
-				if err != nil {
-					as.log.Warn("Failed to marshal standalone tool schema", "tool_name", tool.Name, "error", err)
-					continue
-				}
-				if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
-					as.log.Warn("Failed to unmarshal standalone tool schema", "tool_name", tool.Name, "error", err)
-					continue
-				}
-			}
-		case db.ToolTypeWorkflow:
-			workflowConfig := tool.Config.GetWorkflow()
-			if workflowConfig != nil {
-				// Convert OpenAPI schema to map for Anthropic
-				schemaBytes, err := json.Marshal(workflowConfig.Params)
-				if err != nil {
-					as.log.Warn("Failed to marshal workflow tool schema", "tool_name", tool.Name, "error", err)
-					continue
-				}
-				if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
-					as.log.Warn("Failed to unmarshal workflow tool schema", "tool_name", tool.Name, "error", err)
-					continue
-				}
-			}
-		case db.ToolTypeInternal:
-			internalConfig := tool.Config.GetInternal()
-			if internalConfig != nil {
-				// Convert OpenAPI schema to map for Anthropic
-				schemaBytes, err := json.Marshal(internalConfig.Params)
-				if err != nil {
-					as.log.Warn("Failed to marshal internal tool schema", "tool_name", tool.Name, "error", err)
-					continue
-				}
-				if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
-					as.log.Warn("Failed to unmarshal internal tool schema", "tool_name", tool.Name, "error", err)
-					continue
-				}
-			}
-		case db.ToolTypeMCP:
-			// MCP tools don't have predefined schemas in the database
-			// They are dynamically discovered, so we'll skip them for now
-			as.log.Debug("Skipping MCP tool - dynamic schema discovery required", "tool_name", tool.Name)
-			continue
-		default:
-			as.log.Warn("Unknown tool type", "tool_name", tool.Name, "type", tool.Config.Type)
+	for _, toolRef := range toolRefs {
+		if !foundToolIDs[toolRef] {
+			as.log.Warn("Tool not found in database, will not use this tool", "tool_id", toolRef)
+		}
+	}
+}
+
+// convertToolsToAnthropicParams converts database tools to Anthropic tool parameters
+func (as *AgentService) convertToolsToAnthropicParams(tools []db.Tool) ([]anthropic.ToolUnionParam, error) {
+	var anthropicTools []anthropic.ToolUnionParam
+
+	for _, tool := range tools {
+		anthropicTool, err := as.convertSingleToolToAnthropicParam(tool)
+		if err != nil {
+			// Log the error but continue processing other tools
+			as.log.Warn("Failed to convert tool", "tool_name", tool.Name, "error", err)
 			continue
 		}
-
-		// Create Anthropic tool parameter
-		if inputSchema != nil {
-			// Extract properties and required fields from the schema
-			var properties any
-			var required []string
-
-			if props, exists := inputSchema["properties"]; exists {
-				properties = props
-			}
-			if req, exists := inputSchema["required"]; exists {
-				if reqSlice, ok := req.([]any); ok {
-					required = make([]string, len(reqSlice))
-					for i, r := range reqSlice {
-						if reqStr, ok := r.(string); ok {
-							required[i] = reqStr
-						}
-					}
-				}
-			}
-
-			toolParam := &anthropic.ToolParam{
-				Name:        tool.Name,
-				Description: param.NewOpt(description),
-				InputSchema: anthropic.ToolInputSchemaParam{
-					Type:       "object",
-					Properties: properties,
-					Required:   required,
-				},
-				CacheControl: anthropic.CacheControlEphemeralParam{
-					Type: "ephemeral",
-				},
-			}
-
-			anthropicTool := anthropic.ToolUnionParam{
-				OfTool: toolParam,
-			}
-			anthropicTools = append(anthropicTools, anthropicTool)
+		if anthropicTool != nil {
+			anthropicTools = append(anthropicTools, *anthropicTool)
 		}
 	}
 
 	return anthropicTools, nil
+}
+
+// convertSingleToolToAnthropicParam converts a single database tool to Anthropic tool parameter
+func (as *AgentService) convertSingleToolToAnthropicParam(tool db.Tool) (*anthropic.ToolUnionParam, error) {
+	// Extract description
+	description := ""
+	if tool.Description.Valid {
+		description = tool.Description.String
+	}
+
+	// Convert tool config to parameter schema
+	inputSchema, err := as.extractToolInputSchema(tool)
+	if err != nil {
+		return nil, err
+	}
+
+	if inputSchema == nil {
+		return nil, nil
+	}
+
+	// Create Anthropic tool parameter
+	toolParam := as.createAnthropicToolParam(tool.Name, description, inputSchema)
+	return &anthropic.ToolUnionParam{OfTool: toolParam}, nil
+}
+
+// extractToolInputSchema extracts input schema from tool config based on tool type
+func (as *AgentService) extractToolInputSchema(tool db.Tool) (map[string]any, error) {
+	switch tool.Config.Type {
+	case db.ToolTypeStandalone:
+		return as.marshalToolParams(tool.Config.GetStandalone().Params, string(db.ToolTypeStandalone))
+	case db.ToolTypeWorkflow:
+		return as.marshalToolParams(tool.Config.GetWorkflow().Params, string(db.ToolTypeWorkflow))
+	case db.ToolTypeInternal:
+		return as.marshalToolParams(tool.Config.GetInternal().Params, string(db.ToolTypeInternal))
+	case db.ToolTypeMCP:
+		as.log.Debug("Skipping MCP tool - dynamic schema discovery required", "tool_name", tool.Name)
+		return nil, nil
+	default:
+		as.log.Warn("Unknown tool type", "tool_name", tool.Name, "type", tool.Config.Type)
+		return nil, nil
+	}
+}
+
+// marshalToolParams marshals and unmarshals tool parameters to convert to map[string]any
+func (as *AgentService) marshalToolParams(params any, toolType string) (map[string]any, error) {
+	if params == nil {
+		return nil, nil
+	}
+
+	schemaBytes, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal %s tool schema: %w", toolType, err)
+	}
+
+	var inputSchema map[string]any
+	if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s tool schema: %w", toolType, err)
+	}
+
+	return inputSchema, nil
+}
+
+// createAnthropicToolParam creates an Anthropic tool parameter from schema
+func (as *AgentService) createAnthropicToolParam(name, description string, inputSchema map[string]any) *anthropic.ToolParam {
+	// Extract properties and required fields from the schema
+	var properties any
+	var required []string
+
+	if props, exists := inputSchema["properties"]; exists {
+		properties = props
+	}
+	if req, exists := inputSchema["required"]; exists {
+		if reqSlice, ok := req.([]any); ok {
+			required = make([]string, len(reqSlice))
+			for i, r := range reqSlice {
+				if reqStr, ok := r.(string); ok {
+					required[i] = reqStr
+				}
+			}
+		}
+	}
+
+	return &anthropic.ToolParam{
+		Name:        name,
+		Description: param.NewOpt(description),
+		InputSchema: anthropic.ToolInputSchemaParam{
+			Type:       "object",
+			Properties: properties,
+			Required:   required,
+		},
+		CacheControl: anthropic.CacheControlEphemeralParam{
+			Type: "ephemeral",
+		},
+	}
 }

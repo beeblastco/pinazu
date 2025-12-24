@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -93,7 +94,9 @@ func NewService(ctx context.Context, externalDependenciesConfig *service.Externa
 		optFns := []func(*config.LoadOptions) error{
 			config.WithRegion(externalDependenciesConfig.LLMConfig.Bedrock.Region),
 		}
-		if externalDependenciesConfig.LLMConfig.Bedrock.CredentialType == "assume_role" {
+
+		switch externalDependenciesConfig.LLMConfig.Bedrock.CredentialType {
+		case "assume_role":
 			log.Info("Using Assume Role Credential Type for Bedrock LLM Service")
 			// Create a properly configured AWS config for STS client with region
 			stsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(externalDependenciesConfig.LLMConfig.Bedrock.Region))
@@ -108,7 +111,23 @@ func NewService(ctx context.Context, externalDependenciesConfig *service.Externa
 					o.RoleSessionName = "pinazu-bedrock-" + uuid.New().String()
 				},
 			)))
+		case "default":
+			log.Info("Using Default Credential Type from environment variables for Bedrock LLM Service")
+			// Load credentials from environment variables (using standard AWS environment variable names)
+			if externalDependenciesConfig.LLMConfig.Bedrock.AccessKeyID != "" && externalDependenciesConfig.LLMConfig.Bedrock.SecretAccessKey != "" {
+				log.Debug("Loading static credentials from environment variables")
+				optFns = append(optFns, config.WithCredentialsProvider(
+					credentials.NewStaticCredentialsProvider(
+						externalDependenciesConfig.LLMConfig.Bedrock.AccessKeyID,
+						externalDependenciesConfig.LLMConfig.Bedrock.SecretAccessKey,
+						externalDependenciesConfig.LLMConfig.Bedrock.SessionToken,
+					),
+				))
+			} else {
+				log.Warn("AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY environment variables not set, falling back to default credential chain")
+			}
 		}
+
 		cfg, err = config.LoadDefaultConfig(ctx, optFns...)
 		if err != nil {
 			log.Warn("failed to load AWS configuration %v", err)

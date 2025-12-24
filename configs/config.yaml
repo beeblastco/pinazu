@@ -54,6 +54,9 @@ cache:
 llm_config:
   bedrock:
     type: default
-    region: us-west-2
+    region: ap-southeast-1
+    access_key_id: ${AWS_ACCESS_KEY_ID}
+    secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+    session_token: ${AWS_SESSION_TOKEN}
   google:
     api_key: ${GOOGLE_API_KEY}

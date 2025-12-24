@@ -151,6 +151,23 @@ func NewService(ctx context.Context, config *Config, natsOptions ...nats.Option)
 	if config.ExternalDependencies.Nats != nil && config.ExternalDependencies.Nats.URL != "" {
 		natsURL = config.ExternalDependencies.Nats.URL
 	}
+
+	// Add connection options for better reliability
+	natsOptions = append(natsOptions,
+		nats.Timeout(10*time.Second),      // Increase connection timeout from default 2s
+		nats.RetryOnFailedConnect(true),   // Enable retry on failed connect
+		nats.MaxReconnects(5),             // Try up to 5 times
+		nats.ReconnectWait(2*time.Second), // Wait 2s between retries
+		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
+			if err != nil {
+				fmt.Printf("NATS disconnected: %v\n", err)
+			}
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			fmt.Printf("NATS reconnected to %s\n", nc.ConnectedUrl())
+		}),
+	)
+
 	nc, err := nats.Connect(natsURL, natsOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS server: %w", err)

@@ -1,6 +1,6 @@
 services:
   nats:
-    image: nats:linux
+    image: nats:latest
     ports:
       - "4222:4222"
       - "6222:6222"
